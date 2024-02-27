@@ -1,0 +1,28 @@
+{
+    "classes": [
+        "lamp",
+        "plant",
+        "unknown"
+    ],
+    "mode": "classification",
+    "printHWInfo": false,
+    "inputShapeString": "(160, 160, 3)",
+    "yType": "npy",
+    "trainTestSplit": 0.2,
+    "stratifiedTrainTest": false,
+    "convertInt8": true,
+    "profileInt8": true,
+    "skipEmbeddingsAndMemory": false,
+    "objectDetectionAugmentation": false,
+    "syntiantTarget": false,
+    "maxTrainingTimeSeconds": 604800,
+    "remainingGpuComputeTimeSeconds": null,
+    "isEnterpriseProject": true,
+    "flattenDataset": false,
+    "akidaModel": true,
+    "akidaEdgeModel": false,
+    "skipMemoryProfiling": false,
+    "tensorboardLogging": false,
+    "customValidationSplit": false,
+    "asyncMemoryProfiling": true
+}
