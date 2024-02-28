@@ -1,6 +1,6 @@
-# Local training pipeline for "Brainchip / Image Classification via Transfer Learning - Akida Blocks"
+# Local training pipeline for "Brainchip / FOMO project using BrainChip MetaTF and Akidanet models"
 
-This is the local training pipeline (based on Keras / TensorFlow) for your Edge Impulse project [Brainchip / Image Classification via Transfer Learning - Akida Blocks](http://localhost:4800/studio/149585) (http://localhost:4800/studio/149585). Use it to train your model locally or run experiments. Once you're done with experimentation you can push the model back into Edge Impulse, and retrain from there.
+This is the local training pipeline (based on Keras / TensorFlow) for your Edge Impulse project [Brainchip / FOMO project using BrainChip MetaTF and Akidanet models](http://localhost:4800/studio/148833) (http://localhost:4800/studio/148833). Use it to train your model locally or run experiments. Once you're done with experimentation you can push the model back into Edge Impulse, and retrain from there.
 
 ## Running the pipeline
 
@@ -13,7 +13,7 @@ You run this pipeline via Docker. This encapsulates all dependencies and package
 3. Build the container:
 
     ```
-    $ docker build -t custom-block-149585 .
+    $ docker build -t custom-block-148833 .
     ```
 
 4. Train your model:
@@ -21,13 +21,13 @@ You run this pipeline via Docker. This encapsulates all dependencies and package
     **macOS, Linux**
 
     ```
-    $ docker run --rm -v $PWD:/scripts custom-block-149585 --data-directory data --out-directory out
+    $ docker run --rm -v $PWD:/scripts custom-block-148833 --data-directory data --out-directory out
     ```
 
     **Windows**
 
     ```
-    $ docker run --rm -v "%cd%":/scripts custom-block-149585 --data-directory data --out-directory out
+    $ docker run --rm -v "%cd%":/scripts custom-block-148833 --data-directory data --out-directory out
     ```
 
 5. This will write your model (in TFLite, Saved Model and H5 format) to the `out/` directory.

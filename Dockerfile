@@ -1,4 +1,4 @@
-FROM public.ecr.aws/z9b3d4t5/jobs-container-keras-export-base:d9311cab7049527a58a3fed6791aa7066e3ead53
+FROM public.ecr.aws/z9b3d4t5/jobs-container-keras-export-base:dce56bdc4398de7347fef07f7b5586ac8748061b
 
 WORKDIR /scripts
 
