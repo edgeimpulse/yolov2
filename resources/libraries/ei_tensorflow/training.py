@@ -262,7 +262,7 @@ def get_dataset_from_folder(input,
     # Get batch size for SSD models.
     # "Standard" models (i.e. non object-detection + FOMO) pass this via expert mode.
     if input.mode == 'object-detection' and object_detection_last_layer != 'fomo':
-        object_detection_batch_size = input.objectDetectionBatchSize
+        object_detection_batch_size = 16
 
     train_dataset, validation_dataset, samples_dataset = get_datasets(X_train, Y_train, X_test, Y_test,
                         has_samples, X_samples, Y_samples, mode, classes,

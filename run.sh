@@ -1,0 +1,1 @@
+python3 gen_anchors.py -c config.json

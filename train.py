@@ -1,6 +1,8 @@
 import sys, os, shutil, signal, random, operator, functools, time, subprocess, math, contextlib, io, skimage, argparse
 import logging, threading
 
+from frontend import YOLO
+
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 parser = argparse.ArgumentParser(description='Edge Impulse training scripts')
@@ -79,7 +81,7 @@ if os.path.exists(os.path.join(args.out_directory, 'akida_model.fbz')):
 # For SSD object detection models we specify batch size via 'input'.
 # We must allow it to be overridden via command line args:
 if input.mode == 'object-detection' and 'batch_size' in args and args.batch_size is not None:
-    input.objectDetectionBatchSize = args.batch_size
+    input.objectDetectionBatchSize = args.batch_size or 16
 
 BEST_MODEL_PATH = os.path.join(os.sep, 'tmp', 'best_model.tf' if input.akidaModel else 'best_model.hdf5')
 
@@ -150,48 +152,20 @@ def train_model(train_dataset, validation_dataset, input_length, callbacks,
         Model takes (B, H, W, C) input and
         returns (B, H//8, W//8, num_classes) logits.
         """
-        #! Create a quantized base model without top layers
-        a_base_model = akidanet_imagenet(input_shape=input_shape,
-                                         alpha=alpha,
-                                         include_top=False,
-                                         input_scaling=None)
-    
-        #! Get pretrained quantized weights and load them into the base model
-        #! Available base models are:
-        #! akidanet_imagenet_224.h5                      - float32 model, 224x224x3, alpha=1.00
-        #! akidanet_imagenet_224_alpha_50.h5             - float32 model, 224x224x3, alpha=0.50
-        #! akidanet_imagenet_224_alpha_25.h5             - float32 model, 224x224x3, alpha=0.25
-        #! akidanet_imagenet_160.h5                      - float32 model, 160x160x3, alpha=1.00
-        #! akidanet_imagenet_160_alpha_50.h5             - float32 model, 160x160x3, alpha=0.50
-        #! akidanet_imagenet_160_alpha_25.h5             - float32 model, 160x160x3, alpha=0.25
-        pretrained_weights = os.path.join(WEIGHTS_PREFIX , 'transfer-learning-weights/akidanet/akidanet_imagenet_224_alpha_50.h5')
-        a_base_model.load_weights(pretrained_weights, by_name=True, skip_mismatch=True)
-        a_base_model.trainable = True
-    
-        #! Default batch norm is configured for huge networks, let's speed it up
-        for layer in a_base_model.layers:
-            if type(layer) == BatchNormalization:
-                layer.momentum = 0.9
-    
-        #! Cut AkidaNet where it hits 1/8th input resolution; i.e. (HW/8, HW/8, C)
-        a_cut_point = a_base_model.get_layer('separable_5_relu')
-    
-        #! Now attach a small additional head on the AkidaNet
-        a_model_part_head = Conv2D(filters=32, kernel_size=1, strides=1, padding='same',
-                                   kernel_regularizer=weight_regularizer)(a_cut_point.output)
-        a_model_part = ReLU()(a_model_part_head)
-        a_logits = Conv2D(filters=num_classes, kernel_size=1, strides=1, padding='same',
-                          activation=None, kernel_regularizer=weight_regularizer)(a_model_part)
-    
-        fomo_akida = Model(inputs=a_base_model.input, outputs=a_logits)
-    
+   
+        yolo = YOLO(backend             = 'Tiny Yolo',
+                    input_size          = 224, 
+                    labels              = ['cat', 'car'], 
+                    max_box_per_image   = 10,
+                    anchors             = [0.57273, 0.677385, 1.87446, 2.06253, 3.33843, 5.47434, 7.88282, 3.52778, 9.77052, 9.16828])
+           
         #! Check if the model is sompatbile with Akida (fail quickly before training)
-        compatible = check_model_compatibility(fomo_akida, input_is_image=True)
+        compatible = check_model_compatibility(yolo, input_is_image=True)
         if not compatible:
             print("Model is not compatible with Akida!")
             sys.exit(1)
     
-        return fomo_akida
+        return yolo
     
     def train(num_classes: int, learning_rate: float, num_epochs: int,
                 alpha: float, object_weight: int,
@@ -240,7 +214,7 @@ def train_model(train_dataset, validation_dataset, input_length, callbacks,
             raise Exception(f"Only square inputs are supported; not {input_shape}")
         input_width_height = width
     
-        model = build_model(input_shape=input_shape,
+        yolo = build_model(input_shape=input_shape,
                             alpha=alpha,
                             num_classes=num_classes_with_background,
                             weight_regularizer=tf.keras.regularizers.l2(4e-5))
@@ -252,61 +226,30 @@ def train_model(train_dataset, validation_dataset, input_length, callbacks,
             raise Exception(f"Only square outputs are supported; not {model_output_shape}")
         output_width_height = width
     
-        #! Build weighted cross entropy loss specific to this model size
-        weighted_xent = models.construct_weighted_xent_fn(model.output.shape, object_weight)
-    
-        #! Transform bounding box labels into segmentation maps
-        def as_segmentation(ds):
-            return ds.map(dataset.bbox_to_segmentation(output_width_height, num_classes_with_background)
-                          ).batch(32, drop_remainder=False).prefetch(1)
-        train_segmentation_dataset = as_segmentation(train_dataset)
-        validation_segmentation_dataset = as_segmentation(validation_dataset)
-    
-        validation_dataset_for_callback = validation_dataset.batch(32, drop_remainder=False).prefetch(1)
-    
-        #! Initialise bias of final classifier based on training data prior.
-        util.set_classifier_biases_from_dataset(
-            model, train_segmentation_dataset)
-    
-        if lr_finder:
-            learning_rate = ei_tensorflow.lr_finder.find_lr(model, train_segmentation_dataset, weighted_xent)
-    
-        opt = Adam(learning_rate=learning_rate)
-        model.compile(loss=weighted_xent,
-                        optimizer=opt)
-    
-        #! Create callback that will do centroid scoring on end of epoch against
-        #! validation data. Include a callback to show % progress in slow cases.
-        centroid_callback = metrics.CentroidScoring(validation_dataset_for_callback,
-                                                    output_width_height, num_classes_with_background)
-        print_callback = metrics.PrintPercentageTrained(num_epochs)
-    
-        #! Include a callback for model checkpointing based on the best validation f1.
-        checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(best_model_path,
-                monitor='val_f1', save_best_only=True, mode='max',
-                save_weights_only=True, verbose=0)
-    
-        model.fit(train_segmentation_dataset,
-                  validation_data=validation_segmentation_dataset,
-                  epochs=num_epochs,
-                  callbacks=callbacks + [centroid_callback, print_callback, checkpoint_callback],
-                  verbose=0)
-    
-        #! Restore best weights.
-        model.load_weights(best_model_path)
-    
-        #! Add explicit softmax layer before export.
-        softmax_layer = Softmax()(model.layers[-1].output)
-        model = Model(model.input, softmax_layer)
+        yolo.train(train_imgs     = train_imgs,
+                valid_imgs         = valid_imgs,
+                train_times        = 8,
+                valid_times        = 1,
+                nb_epochs          = 1, 
+                learning_rate      = learning_rate, 
+                batch_size         = 16,
+                warmup_epochs      = 3,
+                object_scale       = 5.0,
+                no_object_scale    = 1.0,
+                coord_scale        = 1.0,
+                class_scale        = 1.0,
+                saved_weights_name = 'save_yolo_weights.h5',
+                debug              = True)
+
     
         #! Check if model is compatible with Akida
-        compatible = check_model_compatibility(model, input_is_image=True)
+        compatible = check_model_compatibility(yolo, input_is_image=True)
         if not compatible:
             print("Model is not compatible with Akida!")
             sys.exit(1)
     
         #! Quantize model to 4/4/8
-        akida_model = quantize_function(keras_model=model)
+        akida_model = quantize_function(keras_model=yolo)
     
         #! Perform quantization-aware training
         akida_model = qat_function(akida_model=akida_model,
@@ -319,7 +262,7 @@ def train_model(train_dataset, validation_dataset, input_length, callbacks,
                                    stopping_metric='val_f1',
                                    fit_verbose=0)
     
-        return model, akida_model
+        return yolo, akida_model
     
     
     EPOCHS = args.epochs or 20
